@@ -40,6 +40,9 @@ static void print_odf_code_string(GString *out, char *str);
 static void print_odf_string(GString *out, char *str);
 static void print_odf_element_list(GString *out, element *list);
 static void print_odf_element(GString *out, element *elt);
+static void print_wpf_string(GString *out, char *str, bool obfuscate);
+static void print_wpf_element_list(GString *out, element *list, bool obfuscate);
+static void print_wpf_element(GString *out, element *elt, bool obfuscate);
 static bool list_contains_key(element *list, int key);
 
 /**********************************************************************
@@ -1109,6 +1112,256 @@ static void print_odf_element(GString *out, element *elt) {
     }
 }
 
+static void print_wpf_string(GString *out, char *str, bool obfuscate) {
+	while (*str != '\0') {
+		switch (*str) {
+		case '&':
+			g_string_append_printf(out, "&amp;");
+			break;
+		case '<':
+			g_string_append_printf(out, "&lt;");
+			break;
+		case '>':
+			g_string_append_printf(out, "&gt;");
+			break;
+		case '"':
+			g_string_append_printf(out, "&quot;");
+			break;
+		default:
+			if (obfuscate && ((int)*str < 128) && ((int)*str >= 0)) {
+				if (rand() % 2 == 0)
+					g_string_append_printf(out, "&#%d;", (int)*str);
+				else
+					g_string_append_printf(out, "&#x%x;", (unsigned int)*str);
+			}
+			else
+				g_string_append_c(out, *str);
+		}
+		str++;
+	}
+}
+
+static void print_wpf_element_list(GString *out, element *list, bool obfuscate) {
+	while (list != NULL) {
+		print_wpf_element(out, list, obfuscate);
+		list = list->next;
+	}
+}
+
+static void print_wpf_element(GString *out, element *elt, bool obfuscate) {
+	int lev;
+	int old_type = 0;
+	switch (elt->key) {
+	case SPACE:
+		g_string_append_printf(out, "%s", elt->contents.str);
+		break;
+	case LINEBREAK:
+		g_string_append_printf(out, "<text:line-break/>");
+		break;
+	case STR:
+		print_wpf_string(out, elt->contents.str, 0);
+		break;
+	case ELLIPSIS:
+		g_string_append_printf(out, "&hellip;");
+		break;
+	case EMDASH:
+		g_string_append_printf(out, "&mdash;");
+		break;
+	case ENDASH:
+		g_string_append_printf(out, "&ndash;");
+		break;
+	case APOSTROPHE:
+		g_string_append_printf(out, "&rsquo;");
+		break;
+	case SINGLEQUOTED:
+		g_string_append_printf(out, "&lsquo;");
+		print_wpf_element_list(out, elt->children, obfuscate);
+		g_string_append_printf(out, "&rsquo;");
+		break;
+	case DOUBLEQUOTED:
+		g_string_append_printf(out, "&ldquo;");
+		print_wpf_element_list(out, elt->children, obfuscate);
+		g_string_append_printf(out, "&rdquo;");
+		break;
+	case CODE:
+		//g_string_append_printf(out, "<text:span text:style-name=\"Source_20_Text\">");
+		print_wpf_string(out, elt->contents.str, 0);
+		//g_string_append_printf(out, "</text:span>");
+		break;
+	case HTML:
+		break;
+	case LINK:
+		g_string_append_printf(out, "<Hyperlink NavigateUri=\"");
+		print_wpf_string(out, elt->contents.link->url, 0);
+		g_string_append_printf(out, "\"");
+		if (strlen(elt->contents.link->title) > 0) {
+			// TODO(): Handle alt-text for xaml?
+			print_wpf_string(out, elt->contents.link->title, 0);
+		}
+		g_string_append_printf(out, ">");
+		print_wpf_element_list(out, elt->contents.link->label, obfuscate);
+		g_string_append_printf(out, "</Hyperlink>");
+		break;
+	case IMAGE:
+		/*g_string_append_printf(out, "<draw:frame text:anchor-type=\"as-char\"\ndraw:z-index=\"0\" draw:style-name=\"fr1\" svg:width=\"95%%\"");
+		g_string_append_printf(out, ">\n<draw:text-box><text:p><draw:frame text:anchor-type=\"as-char\" draw:z-index=\"1\" ");
+		g_string_append_printf(out, "><draw:image xlink:href=\"");
+		print_odf_string(out, elt->contents.link->url);
+		g_string_append_printf(out, "\" xlink:type=\"simple\" xlink:show=\"embed\" xlink:actuate=\"onLoad\" draw:filter-name=\"&lt;All formats&gt;\"/>\n</draw:frame></text:p>");
+		g_string_append_printf(out, "</draw:text-box></draw:frame>\n");*/
+		break;
+	case EMPH:
+		/*g_string_append_printf(out,
+			"<text:span text:style-name=\"MMD-Italic\">");
+		print_odf_element_list(out, elt->children);
+		g_string_append_printf(out, "</text:span>");*/
+		break;
+	case STRONG:
+		/*g_string_append_printf(out,
+			"<text:span text:style-name=\"MMD-Bold\">");
+		print_odf_element_list(out, elt->children);
+		g_string_append_printf(out, "</text:span>");*/
+		break;
+	case STRIKE:
+		/*g_string_append_printf(out,
+			"<text:span text:style-name=\"StrikeThrough\">");
+		print_odf_element_list(out, elt->children);
+		g_string_append_printf(out, "</text:span>");*/
+		break;
+	case LIST:
+		print_wpf_element_list(out, elt->children, obfuscate);
+		break;
+	case RAW:
+		/* Shouldn't occur - these are handled by process_raw_blocks() */
+		assert(elt->key != RAW);
+		break;
+	case H1: case H2: case H3: case H4: case H5: case H6:
+		//lev = elt->key - H1 + 1;  /* assumes H1 ... H6 are in order */
+		//g_string_append_printf(out, "<text:h text:outline-level=\"%d\">", lev);
+		print_wpf_element_list(out, elt->children, obfuscate);
+		//g_string_append_printf(out, "</text:h>\n");
+		//padded = 0;
+		break;
+	case PLAIN:
+		print_wpf_element_list(out, elt->children, obfuscate);
+		padded = 0;
+		break;
+	case PARA:
+		//g_string_append_printf(out, "<text:p");
+		//switch (odf_type) {
+		//case BLOCKQUOTE:
+		//	g_string_append_printf(out, " text:style-name=\"Quotations\"");
+		//	break;
+		//case CODE:
+		//	g_string_append_printf(out, " text:style-name=\"Preformatted Text\"");
+		//	break;
+		//case VERBATIM:
+		//	g_string_append_printf(out, " text:style-name=\"Preformatted Text\"");
+		//	break;
+		//case ORDEREDLIST:
+		//case BULLETLIST:
+		//	g_string_append_printf(out, " text:style-name=\"P2\"");
+		//	break;
+		//case NOTE:
+		//	g_string_append_printf(out, " text:style-name=\"Footnote\"");
+		//	break;
+		//default:
+		//	g_string_append_printf(out, " text:style-name=\"Standard\"");
+		//	break;
+		//}
+		//g_string_append_printf(out, ">");
+		print_wpf_element_list(out, elt->children, obfuscate);
+		//g_string_append_printf(out, "</text:p>\n");
+		break;
+	case HRULE:
+		/*g_string_append_printf(out, "<text:p text:style-name=\"Horizontal_20_Line\"/>\n");*/
+		break;
+	case HTMLBLOCK:
+		/* don't print HTML block */
+		/* but do print HTML comments for raw ODF */
+		//if (strncmp(elt->contents.str, "<!--", 4) == 0) {
+		//	/* trim "-->" from end */
+		//	elt->contents.str[strlen(elt->contents.str) - 3] = '\0';
+		//	g_string_append_printf(out, "%s", &elt->contents.str[4]);
+		//}
+		break;
+	case VERBATIM:
+		//old_type = odf_type;
+		//odf_type = VERBATIM;
+		//g_string_append_printf(out, "<text:p text:style-name=\"Preformatted Text\">");
+		//print_odf_code_string(out, elt->contents.str);
+		//g_string_append_printf(out, "</text:p>\n");
+		//odf_type = old_type;
+		break;
+	case BULLETLIST:
+		//if ((odf_type == BULLETLIST) ||
+		//	(odf_type == ORDEREDLIST)) {
+		//	/* I think this was made unnecessary by another change.
+		//	Same for ORDEREDLIST below */
+		//	/*  g_string_append_printf(out, "</text:p>"); */
+		//}
+		//old_type = odf_type;
+		//odf_type = BULLETLIST;
+		//g_string_append_printf(out, "%s", "<text:list>");
+		print_wpf_element_list(out, elt->children, obfuscate);
+		//g_string_append_printf(out, "%s", "</text:list>");
+		//odf_type = old_type;
+		break;
+	case ORDEREDLIST:
+		//if ((odf_type == BULLETLIST) ||
+		//	(odf_type == ORDEREDLIST)) {
+		//	/* g_string_append_printf(out, "</text:p>"); */
+		//}
+		//old_type = odf_type;
+		//odf_type = ORDEREDLIST;
+		//g_string_append_printf(out, "%s", "<text:list>\n");
+		print_wpf_element_list(out, elt->children, obfuscate);
+		//g_string_append_printf(out, "%s", "</text:list>\n");
+		//odf_type = old_type;
+		break;
+	case LISTITEM:
+		//g_string_append_printf(out, "<text:list-item>\n");
+		//if (elt->children->children->key != PARA) {
+		//	g_string_append_printf(out, "<text:p text:style-name=\"P2\">");
+		//}
+		print_wpf_element_list(out, elt->children, obfuscate);
+
+		//if ((list_contains_key(elt->children, BULLETLIST) ||
+		//	(list_contains_key(elt->children, ORDEREDLIST)))) {
+		//}
+		//else {
+		//	if (elt->children->children->key != PARA) {
+		//		g_string_append_printf(out, "</text:p>");
+		//	}
+		//}
+		//g_string_append_printf(out, "</text:list-item>\n");
+		break;
+	case BLOCKQUOTE:
+		//old_type = odf_type;
+		//odf_type = BLOCKQUOTE;
+		print_wpf_element_list(out, elt->children, obfuscate);
+		//odf_type = old_type;
+		break;
+	case REFERENCE:
+		break;
+	case NOTE:
+		//old_type = odf_type;
+		//odf_type = NOTE;
+		///* if contents.str == 0 then print; else ignore - like above */
+		//if (elt->contents.str == 0) {
+		//	g_string_append_printf(out, "<text:note text:id=\"\" text:note-class=\"footnote\"><text:note-body>\n");
+		//	print_odf_element_list(out, elt->children);
+		//	g_string_append_printf(out, "</text:note-body>\n</text:note>\n");
+		//}
+		//elt->children = NULL;
+		//odf_type = old_type;
+		break;
+		default:
+			fprintf(stderr, "print_odf_element encountered unknown element key = %d\n", elt->key);
+			exit(EXIT_FAILURE);
+	}
+}
+
 /**********************************************************************
 
   Parameterized function for printing an Element.
@@ -1146,6 +1399,9 @@ void print_element_list(GString *out, element *elt, int format, int exts) {
         if (elt != NULL) print_odf_element_list(out,elt);
         print_odf_footer(out);
         break;
+	case WPF_XAML_FORMAT:
+		print_wpf_element_list(out, elt, false);
+		break;
     default:
         fprintf(stderr, "print_element - unknown format = %d\n", format); 
         exit(EXIT_FAILURE);
